@@ -1,9 +1,11 @@
 package com.foodflow.service;
 
+import com.foodflow.dto.FoodPatchRequest;
 import com.foodflow.dto.FoodRequest;
 import com.foodflow.dto.FoodResponse;
 import com.foodflow.entity.FoodItem;
 import com.foodflow.entity.Restaurant;
+import com.foodflow.exception.ApiException;
 import com.foodflow.exception.ResourceNotFoundException;
 import com.foodflow.repository.FoodItemRepository;
 import com.foodflow.repository.RestaurantRepository;
@@ -42,7 +44,6 @@ class FoodServiceTest {
     void setUp() {
         sampleRestaurant = Restaurant.builder()
                 .id(1L)
-                .restaurantId("r001")
                 .restaurantName("Green Bowl")
                 .build();
 
@@ -82,10 +83,11 @@ class FoodServiceTest {
         assertThat(result).isNotNull();
         assertThat(result.getId()).isEqualTo(10L);
         assertThat(result.getPrice()).isEqualTo(350.0);
+        assertThat(result.getItemId()).isEqualTo("m004");
     }
 
     @Test
-    @DisplayName("Should create food item successfully")
+    @DisplayName("Should create food item successfully with restaurant relationship")
     void shouldCreateFood() {
         FoodRequest request = FoodRequest.builder()
                 .itemId("m005")
@@ -105,17 +107,108 @@ class FoodServiceTest {
     }
 
     @Test
-    @DisplayName("Should throw ResourceNotFoundException when creating food with invalid restaurant id")
-    void shouldThrowWhenCreatingFoodWithInvalidRestaurant() {
-        FoodRequest request = FoodRequest.builder()
-                .name("Tofu Stir Fry")
-                .price(299.0)
-                .restaurantId(99L)
+    @DisplayName("Should PATCH single field (price: 600)")
+    void shouldPatchSingleFieldPrice() {
+        FoodPatchRequest patch = FoodPatchRequest.builder()
+                .price(600.0)
                 .build();
 
-        when(restaurantRepository.findById(99L)).thenReturn(Optional.empty());
+        when(foodItemRepository.findById(10L)).thenReturn(Optional.of(sampleFood));
+        when(foodItemRepository.save(any(FoodItem.class))).thenReturn(sampleFood);
 
-        assertThatThrownBy(() -> foodService.createFood(request))
+        FoodResponse response = foodService.patchFood(10L, patch);
+
+        assertThat(response).isNotNull();
+        assertThat(sampleFood.getPrice()).isEqualTo(600.0);
+        assertThat(sampleFood.getName()).isEqualTo("Grilled Paneer Protein Bowl"); // unchanged
+        assertThat(sampleFood.getRestaurant().getId()).isEqualTo(1L); // immutable restaurant relationship
+    }
+
+    @Test
+    @DisplayName("Should PATCH multiple fields (name and price)")
+    void shouldPatchMultipleFieldsNameAndPrice() {
+        FoodPatchRequest patch = FoodPatchRequest.builder()
+                .name("Paneer Tikka Special")
+                .price(550.0)
+                .build();
+
+        when(foodItemRepository.findById(10L)).thenReturn(Optional.of(sampleFood));
+        when(foodItemRepository.save(any(FoodItem.class))).thenReturn(sampleFood);
+
+        FoodResponse response = foodService.patchFood(10L, patch);
+
+        assertThat(response).isNotNull();
+        assertThat(sampleFood.getName()).isEqualTo("Paneer Tikka Special");
+        assertThat(sampleFood.getPrice()).isEqualTo(550.0);
+        assertThat(sampleFood.getDescription()).isEqualTo("Healthy bowl"); // unchanged
+    }
+
+    @Test
+    @DisplayName("Should PATCH all editable fields")
+    void shouldPatchAllFields() {
+        FoodPatchRequest patch = FoodPatchRequest.builder()
+                .itemId("m004-v2")
+                .name("Paneer Tikka Protein Bowl")
+                .description("High protein healthy meal")
+                .category("Healthy")
+                .price(600.0)
+                .isVeg(true)
+                .spiceLevel("Medium")
+                .dietaryTags("Vegetarian, High Protein")
+                .build();
+
+        when(foodItemRepository.findById(10L)).thenReturn(Optional.of(sampleFood));
+        when(foodItemRepository.save(any(FoodItem.class))).thenReturn(sampleFood);
+
+        FoodResponse response = foodService.patchFood(10L, patch);
+
+        assertThat(response).isNotNull();
+        assertThat(sampleFood.getItemId()).isEqualTo("m004-v2");
+        assertThat(sampleFood.getName()).isEqualTo("Paneer Tikka Protein Bowl");
+        assertThat(sampleFood.getDescription()).isEqualTo("High protein healthy meal");
+        assertThat(sampleFood.getCategory()).isEqualTo("Healthy");
+        assertThat(sampleFood.getPrice()).isEqualTo(600.0);
+        assertThat(sampleFood.getIsVeg()).isTrue();
+        assertThat(sampleFood.getSpiceLevel()).isEqualTo("Medium");
+        assertThat(sampleFood.getDietaryTags()).isEqualTo("Vegetarian, High Protein");
+    }
+
+    @Test
+    @DisplayName("Should throw ApiException 400 when PATCH payload is empty {}")
+    void shouldThrow400OnEmptyPatch() {
+        FoodPatchRequest emptyPatch = FoodPatchRequest.builder().build();
+
+        assertThatThrownBy(() -> foodService.patchFood(10L, emptyPatch))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("cannot be empty");
+
+        verify(foodItemRepository, never()).save(any(FoodItem.class));
+    }
+
+    @Test
+    @DisplayName("Should throw ApiException 400 when PATCH price is negative")
+    void shouldThrow400OnNegativePrice() {
+        FoodPatchRequest invalidPatch = FoodPatchRequest.builder()
+                .price(-50.0)
+                .build();
+
+        when(foodItemRepository.findById(10L)).thenReturn(Optional.of(sampleFood));
+
+        assertThatThrownBy(() -> foodService.patchFood(10L, invalidPatch))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Price must be greater than or equal to 0");
+    }
+
+    @Test
+    @DisplayName("Should throw ResourceNotFoundException when patching nonexistent food")
+    void shouldThrow404WhenPatchingNonexistent() {
+        FoodPatchRequest patch = FoodPatchRequest.builder()
+                .price(400.0)
+                .build();
+
+        when(foodItemRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> foodService.patchFood(999L, patch))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 }

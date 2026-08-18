@@ -10,9 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Entity
-@Table(name = "restaurants", indexes = {
-        @Index(name = "idx_restaurant_external_id", columnList = "restaurant_id")
-})
+@Table(name = "restaurants")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -23,9 +21,6 @@ public class Restaurant {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
-    @Column(name = "restaurant_id", length = 50)
-    private String restaurantId;
 
     @Column(name = "restaurant_name", nullable = false, length = 150)
     private String restaurantName;
@@ -38,8 +33,9 @@ public class Restaurant {
 
     private Double rating;
 
-    @Column(name = "price_range", length = 50)
-    private String priceRange;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private User owner;
 
     @OneToMany(mappedBy = "restaurant", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default

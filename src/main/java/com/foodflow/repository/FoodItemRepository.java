@@ -14,8 +14,6 @@ public interface FoodItemRepository extends JpaRepository<FoodItem, Long> {
 
     List<FoodItem> findByRestaurantId(Long restaurantId);
 
-    List<FoodItem> findByRestaurant_RestaurantId(String restaurantId);
-
     List<FoodItem> findByCategoryIgnoreCase(String category);
 
     List<FoodItem> findByIsVeg(Boolean isVeg);

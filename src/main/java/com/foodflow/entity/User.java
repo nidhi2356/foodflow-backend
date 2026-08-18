@@ -42,6 +42,10 @@ public class User {
     @Builder.Default
     private Role role = Role.ROLE_USER;
 
+    @OneToMany(mappedBy = "owner", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<Restaurant> restaurants = new ArrayList<>();
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<Favorite> favorites = new ArrayList<>();

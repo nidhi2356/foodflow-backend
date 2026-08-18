@@ -1,8 +1,10 @@
 package com.foodflow.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.foodflow.dto.FoodPatchRequest;
 import com.foodflow.dto.FoodRequest;
 import com.foodflow.dto.FoodResponse;
+import com.foodflow.exception.ApiException;
 import com.foodflow.exception.ResourceNotFoundException;
 import com.foodflow.security.JwtService;
 import com.foodflow.service.FoodService;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -96,6 +99,7 @@ class FoodControllerTest {
                 .name("Grilled Paneer Protein Bowl")
                 .price(350.0)
                 .isVeg(true)
+                .restaurantId(1L)
                 .build();
 
         FoodResponse response = FoodResponse.builder()
@@ -103,6 +107,7 @@ class FoodControllerTest {
                 .name("Grilled Paneer Protein Bowl")
                 .price(350.0)
                 .isVeg(true)
+                .restaurantId(1L)
                 .build();
 
         when(foodService.createFood(any(FoodRequest.class))).thenReturn(response);
@@ -120,11 +125,85 @@ class FoodControllerTest {
         FoodRequest request = FoodRequest.builder()
                 .name("Grilled Paneer Protein Bowl")
                 .price(-50.0)
+                .restaurantId(1L)
                 .build();
 
         mockMvc.perform(post("/api/foods")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.price").exists());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/foods/{id} single field (price: 600)")
+    void patchFoodSingleFieldShouldReturn200() throws Exception {
+        FoodPatchRequest patch = FoodPatchRequest.builder()
+                .price(600.0)
+                .build();
+
+        FoodResponse response = FoodResponse.builder()
+                .id(1L)
+                .name("Grilled Paneer Protein Bowl")
+                .price(600.0)
+                .build();
+
+        when(foodService.patchFood(eq(1L), any(FoodPatchRequest.class))).thenReturn(response);
+
+        mockMvc.perform(patch("/api/foods/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(patch)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.price").value(600.0));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/foods/{id} multiple fields (name and price)")
+    void patchFoodMultipleFieldsShouldReturn200() throws Exception {
+        FoodPatchRequest patch = FoodPatchRequest.builder()
+                .name("Paneer Tikka Special")
+                .price(550.0)
+                .build();
+
+        FoodResponse response = FoodResponse.builder()
+                .id(1L)
+                .name("Paneer Tikka Special")
+                .price(550.0)
+                .build();
+
+        when(foodService.patchFood(eq(1L), any(FoodPatchRequest.class))).thenReturn(response);
+
+        mockMvc.perform(patch("/api/foods/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(patch)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Paneer Tikka Special"))
+                .andExpect(jsonPath("$.price").value(550.0));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/foods/{id} with empty {} should return 400 Bad Request")
+    void patchFoodEmptyObjectShouldReturn400() throws Exception {
+        when(foodService.patchFood(eq(1L), any(FoodPatchRequest.class)))
+                .thenThrow(new ApiException("Patch request body cannot be empty", HttpStatus.BAD_REQUEST));
+
+        mockMvc.perform(patch("/api/foods/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/foods/{id} with negative price should return 400 Bad Request")
+    void patchFoodNegativePriceShouldReturn400() throws Exception {
+        FoodPatchRequest patch = FoodPatchRequest.builder()
+                .price(-100.0)
+                .build();
+
+        mockMvc.perform(patch("/api/foods/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(patch)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.validationErrors.price").exists());
     }

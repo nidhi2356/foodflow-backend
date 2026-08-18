@@ -1,13 +1,18 @@
 package com.foodflow.service;
 
+import com.foodflow.dto.RestaurantPatchRequest;
 import com.foodflow.dto.RestaurantRequest;
 import com.foodflow.dto.RestaurantResponse;
 import com.foodflow.entity.Restaurant;
-import com.foodflow.exception.DuplicateResourceException;
+import com.foodflow.entity.User;
+import com.foodflow.exception.ApiException;
 import com.foodflow.exception.ResourceNotFoundException;
 import com.foodflow.repository.RestaurantRepository;
+import com.foodflow.repository.UserRepository;
+import com.foodflow.util.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,9 +25,11 @@ public class RestaurantService {
     private static final Logger log = LoggerFactory.getLogger(RestaurantService.class);
 
     private final RestaurantRepository restaurantRepository;
+    private final UserRepository userRepository;
 
-    public RestaurantService(RestaurantRepository restaurantRepository) {
+    public RestaurantService(RestaurantRepository restaurantRepository, UserRepository userRepository) {
         this.restaurantRepository = restaurantRepository;
+        this.userRepository = userRepository;
     }
 
     @Transactional(readOnly = true)
@@ -45,30 +52,20 @@ public class RestaurantService {
                 .orElseThrow(() -> new ResourceNotFoundException("Restaurant", "id", id));
     }
 
-    @Transactional(readOnly = true)
-    public RestaurantResponse getRestaurantByExternalId(String restaurantId) {
-        Restaurant restaurant = restaurantRepository.findByRestaurantId(restaurantId)
-                .orElseThrow(() -> new ResourceNotFoundException("Restaurant", "restaurantId", restaurantId));
-        return mapToRestaurantResponse(restaurant);
-    }
-
     @Transactional
     public RestaurantResponse createRestaurant(RestaurantRequest request) {
         log.info("Creating restaurant: {}", request.getRestaurantName());
 
-        if (request.getRestaurantId() != null && !request.getRestaurantId().isBlank()) {
-            if (restaurantRepository.existsByRestaurantId(request.getRestaurantId().trim())) {
-                throw new DuplicateResourceException("Restaurant with external ID '" + request.getRestaurantId() + "' already exists");
-            }
-        }
+        String username = SecurityUtils.getCurrentUsername();
+        User owner = userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "username", username));
 
         Restaurant restaurant = Restaurant.builder()
-                .restaurantId(request.getRestaurantId() != null ? request.getRestaurantId().trim() : null)
                 .restaurantName(request.getRestaurantName().trim())
                 .location(request.getLocation())
                 .cuisine(request.getCuisine())
                 .rating(request.getRating())
-                .priceRange(request.getPriceRange())
+                .owner(owner)
                 .build();
 
         Restaurant saved = restaurantRepository.save(restaurant);
@@ -76,25 +73,37 @@ public class RestaurantService {
     }
 
     @Transactional
-    public RestaurantResponse updateRestaurant(Long id, RestaurantRequest request) {
-        log.info("Updating restaurant id: {}", id);
+    public RestaurantResponse patchRestaurant(Long id, RestaurantPatchRequest request) {
+        log.info("Patching restaurant id: {}", id);
+
+        if (request == null || !request.hasUpdates()) {
+            throw new ApiException("Patch request body cannot be empty", HttpStatus.BAD_REQUEST);
+        }
 
         Restaurant restaurant = restaurantRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Restaurant", "id", id));
 
-        if (request.getRestaurantId() != null && !request.getRestaurantId().isBlank()) {
-            if (!request.getRestaurantId().equals(restaurant.getRestaurantId())
-                    && restaurantRepository.existsByRestaurantId(request.getRestaurantId())) {
-                throw new DuplicateResourceException("Restaurant with external ID '" + request.getRestaurantId() + "' already exists");
+        if (request.getRestaurantName() != null) {
+            if (request.getRestaurantName().trim().isEmpty()) {
+                throw new ApiException("Restaurant name cannot be blank", HttpStatus.BAD_REQUEST);
             }
-            restaurant.setRestaurantId(request.getRestaurantId().trim());
+            restaurant.setRestaurantName(request.getRestaurantName().trim());
         }
 
-        restaurant.setRestaurantName(request.getRestaurantName().trim());
-        restaurant.setLocation(request.getLocation());
-        restaurant.setCuisine(request.getCuisine());
-        restaurant.setRating(request.getRating());
-        restaurant.setPriceRange(request.getPriceRange());
+        if (request.getLocation() != null) {
+            restaurant.setLocation(request.getLocation().trim());
+        }
+
+        if (request.getCuisine() != null) {
+            restaurant.setCuisine(request.getCuisine().trim());
+        }
+
+        if (request.getRating() != null) {
+            if (request.getRating() < 0.0 || request.getRating() > 5.0) {
+                throw new ApiException("Rating must be between 0.0 and 5.0", HttpStatus.BAD_REQUEST);
+            }
+            restaurant.setRating(request.getRating());
+        }
 
         Restaurant updated = restaurantRepository.save(restaurant);
         return mapToRestaurantResponse(updated);
@@ -110,14 +119,15 @@ public class RestaurantService {
     }
 
     public RestaurantResponse mapToRestaurantResponse(Restaurant restaurant) {
+        User owner = restaurant.getOwner();
         return RestaurantResponse.builder()
                 .id(restaurant.getId())
-                .restaurantId(restaurant.getRestaurantId())
                 .restaurantName(restaurant.getRestaurantName())
                 .location(restaurant.getLocation())
                 .cuisine(restaurant.getCuisine())
                 .rating(restaurant.getRating())
-                .priceRange(restaurant.getPriceRange())
+                .ownerId(owner != null ? owner.getId() : null)
+                .ownerUsername(owner != null ? owner.getUsername() : null)
                 .foodItemCount(restaurant.getFoodItems() != null ? restaurant.getFoodItems().size() : 0)
                 .createdAt(restaurant.getCreatedAt())
                 .build();

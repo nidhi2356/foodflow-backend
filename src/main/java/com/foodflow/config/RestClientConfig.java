@@ -16,10 +16,10 @@ public class RestClientConfig {
     @Value("${foodflow.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
 
-    @Value("${foodflow.ai.connect-timeout-seconds:5}")
+    @Value("${foodflow.ai.connect-timeout-seconds:10}")
     private int connectTimeoutSeconds;
 
-    @Value("${foodflow.ai.read-timeout-seconds:30}")
+    @Value("${foodflow.ai.read-timeout-seconds:180}")
     private int readTimeoutSeconds;
 
     @Bean

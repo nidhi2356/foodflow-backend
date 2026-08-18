@@ -47,10 +47,10 @@ class SearchServiceTest {
                 .text("Delicious high protein vegetarian bowl with grilled paneer and fresh veggies")
                 .metadata(metadata)
                 .crossEncoderScore(3.5675)
-                .normalizedCrossScore(1.0)
+                .normalizedCrossScore(0.85)
                 .metadataScore(2.0)
-                .normalizedMetadataScore(1.0)
-                .finalScore(1.0)
+                .normalizedMetadataScore(0.25)
+                .finalScore(0.72)
                 .build();
 
         mockAiResponse = AiSearchResponse.builder()
@@ -60,8 +60,8 @@ class SearchServiceTest {
     }
 
     @Test
-    @DisplayName("Should successfully coordinate search and map AI response to frontend DTO")
-    void shouldSearchSuccessfully() {
+    @DisplayName("Should successfully coordinate search and preserve exact AI scores and metadata")
+    void shouldSearchSuccessfullyAndPreserveScores() {
         SearchRequest request = SearchRequest.builder()
                 .query("healthy high protein vegetarian dinner under 400")
                 .topK(5)
@@ -82,7 +82,11 @@ class SearchServiceTest {
         assertThat(firstResult.getRestaurantName()).isEqualTo("Green Bowl");
         assertThat(firstResult.getPrice()).isEqualTo(350.0);
         assertThat(firstResult.getIsVeg()).isTrue();
-        assertThat(firstResult.getFinalScore()).isEqualTo(1.0);
+        assertThat(firstResult.getCrossEncoderScore()).isEqualTo(3.5675);
+        assertThat(firstResult.getNormalizedCrossScore()).isEqualTo(0.85);
+        assertThat(firstResult.getMetadataScore()).isEqualTo(2.0);
+        assertThat(firstResult.getNormalizedMetadataScore()).isEqualTo(0.25);
+        assertThat(firstResult.getFinalScore()).isEqualTo(0.72);
     }
 
     @Test

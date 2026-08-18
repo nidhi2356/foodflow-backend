@@ -1,14 +1,17 @@
 package com.foodflow.service;
 
+import com.foodflow.dto.FoodPatchRequest;
 import com.foodflow.dto.FoodRequest;
 import com.foodflow.dto.FoodResponse;
 import com.foodflow.entity.FoodItem;
 import com.foodflow.entity.Restaurant;
+import com.foodflow.exception.ApiException;
 import com.foodflow.exception.ResourceNotFoundException;
 import com.foodflow.repository.FoodItemRepository;
 import com.foodflow.repository.RestaurantRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,13 +61,6 @@ public class FoodService {
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
-    public List<FoodResponse> getFoodsByRestaurantExternalId(String restaurantExternalId) {
-        return foodItemRepository.findByRestaurant_RestaurantId(restaurantExternalId).stream()
-                .map(this::mapToFoodResponse)
-                .collect(Collectors.toList());
-    }
-
     @Transactional
     public FoodResponse createFood(FoodRequest request) {
         log.info("Creating food item: {}", request.getName());
@@ -92,31 +88,53 @@ public class FoodService {
     }
 
     @Transactional
-    public FoodResponse updateFood(Long id, FoodRequest request) {
-        log.info("Updating food item id: {}", id);
+    public FoodResponse patchFood(Long id, FoodPatchRequest request) {
+        log.info("Patching food item id: {}", id);
+
+        if (request == null || !request.hasUpdates()) {
+            throw new ApiException("Patch request body cannot be empty", HttpStatus.BAD_REQUEST);
+        }
 
         FoodItem foodItem = foodItemRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("FoodItem", "id", id));
 
-        Restaurant restaurant = foodItem.getRestaurant();
-        if (request.getRestaurantId() != null) {
-            if (restaurant == null || !request.getRestaurantId().equals(restaurant.getId())) {
-                restaurant = restaurantRepository.findById(request.getRestaurantId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Restaurant", "id", request.getRestaurantId()));
-            }
+        if (request.getItemId() != null) {
+            foodItem.setItemId(request.getItemId().trim());
         }
 
-        foodItem.setItemId(request.getItemId());
-        foodItem.setName(request.getName().trim());
-        foodItem.setDescription(request.getDescription());
-        foodItem.setCategory(request.getCategory());
-        foodItem.setPrice(request.getPrice());
+        if (request.getName() != null) {
+            if (request.getName().trim().isEmpty()) {
+                throw new ApiException("Food name cannot be blank", HttpStatus.BAD_REQUEST);
+            }
+            foodItem.setName(request.getName().trim());
+        }
+
+        if (request.getDescription() != null) {
+            foodItem.setDescription(request.getDescription().trim());
+        }
+
+        if (request.getCategory() != null) {
+            foodItem.setCategory(request.getCategory().trim());
+        }
+
+        if (request.getPrice() != null) {
+            if (request.getPrice() < 0.0) {
+                throw new ApiException("Price must be greater than or equal to 0", HttpStatus.BAD_REQUEST);
+            }
+            foodItem.setPrice(request.getPrice());
+        }
+
         if (request.getIsVeg() != null) {
             foodItem.setIsVeg(request.getIsVeg());
         }
-        foodItem.setSpiceLevel(request.getSpiceLevel());
-        foodItem.setDietaryTags(request.getDietaryTags());
-        foodItem.setRestaurant(restaurant);
+
+        if (request.getSpiceLevel() != null) {
+            foodItem.setSpiceLevel(request.getSpiceLevel().trim());
+        }
+
+        if (request.getDietaryTags() != null) {
+            foodItem.setDietaryTags(request.getDietaryTags().trim());
+        }
 
         FoodItem updated = foodItemRepository.save(foodItem);
         return mapToFoodResponse(updated);
@@ -145,7 +163,6 @@ public class FoodService {
                 .dietaryTags(foodItem.getDietaryTags())
                 .restaurantId(restaurant != null ? restaurant.getId() : null)
                 .restaurantName(restaurant != null ? restaurant.getRestaurantName() : null)
-                .restaurantExternalId(restaurant != null ? restaurant.getRestaurantId() : null)
                 .createdAt(foodItem.getCreatedAt())
                 .build();
     }
