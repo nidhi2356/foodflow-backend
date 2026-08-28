@@ -12,12 +12,18 @@ import com.foodflow.repository.UserRepository;
 import com.foodflow.util.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static com.foodflow.config.RedisConfig.RESTAURANTS_CACHE;
+import static com.foodflow.config.RedisConfig.RESTAURANT_FOODS_CACHE;
 
 @Service
 public class RestaurantService {
@@ -33,6 +39,7 @@ public class RestaurantService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = RESTAURANTS_CACHE, key = "'all'")
     public List<RestaurantResponse> getAllRestaurants() {
         return restaurantRepository.findAll().stream()
                 .map(this::mapToRestaurantResponse)
@@ -40,6 +47,7 @@ public class RestaurantService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = RESTAURANTS_CACHE, key = "#id")
     public RestaurantResponse getRestaurantById(Long id) {
         Restaurant restaurant = restaurantRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Restaurant", "id", id));
@@ -53,6 +61,7 @@ public class RestaurantService {
     }
 
     @Transactional
+    @CacheEvict(value = RESTAURANTS_CACHE, allEntries = true)
     public RestaurantResponse createRestaurant(RestaurantRequest request) {
         log.info("Creating restaurant: {}", request.getRestaurantName());
 
@@ -73,6 +82,7 @@ public class RestaurantService {
     }
 
     @Transactional
+    @CacheEvict(value = RESTAURANTS_CACHE, allEntries = true)
     public RestaurantResponse patchRestaurant(Long id, RestaurantPatchRequest request) {
         log.info("Patching restaurant id: {}", id);
 
@@ -110,6 +120,10 @@ public class RestaurantService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = RESTAURANTS_CACHE, allEntries = true),
+            @CacheEvict(value = RESTAURANT_FOODS_CACHE, allEntries = true)
+    })
     public void deleteRestaurant(Long id) {
         log.info("Deleting restaurant id: {}", id);
         if (!restaurantRepository.existsById(id)) {

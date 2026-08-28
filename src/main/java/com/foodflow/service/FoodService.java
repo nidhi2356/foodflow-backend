@@ -11,12 +11,18 @@ import com.foodflow.repository.FoodItemRepository;
 import com.foodflow.repository.RestaurantRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static com.foodflow.config.RedisConfig.FOODS_CACHE;
+import static com.foodflow.config.RedisConfig.RESTAURANT_FOODS_CACHE;
 
 @Service
 public class FoodService {
@@ -32,6 +38,7 @@ public class FoodService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = FOODS_CACHE, key = "'all'")
     public List<FoodResponse> getAllFoods() {
         return foodItemRepository.findAll().stream()
                 .map(this::mapToFoodResponse)
@@ -39,6 +46,7 @@ public class FoodService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = FOODS_CACHE, key = "#id")
     public FoodResponse getFoodById(Long id) {
         FoodItem foodItem = foodItemRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("FoodItem", "id", id));
@@ -52,6 +60,7 @@ public class FoodService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = RESTAURANT_FOODS_CACHE, key = "#restaurantId")
     public List<FoodResponse> getFoodsByRestaurant(Long restaurantId) {
         if (!restaurantRepository.existsById(restaurantId)) {
             throw new ResourceNotFoundException("Restaurant", "id", restaurantId);
@@ -62,6 +71,10 @@ public class FoodService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = FOODS_CACHE, allEntries = true),
+            @CacheEvict(value = RESTAURANT_FOODS_CACHE, allEntries = true)
+    })
     public FoodResponse createFood(FoodRequest request) {
         log.info("Creating food item: {}", request.getName());
 
@@ -88,6 +101,10 @@ public class FoodService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = FOODS_CACHE, allEntries = true),
+            @CacheEvict(value = RESTAURANT_FOODS_CACHE, allEntries = true)
+    })
     public FoodResponse patchFood(Long id, FoodPatchRequest request) {
         log.info("Patching food item id: {}", id);
 
@@ -141,6 +158,10 @@ public class FoodService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = FOODS_CACHE, allEntries = true),
+            @CacheEvict(value = RESTAURANT_FOODS_CACHE, allEntries = true)
+    })
     public void deleteFood(Long id) {
         log.info("Deleting food item id: {}", id);
         if (!foodItemRepository.existsById(id)) {
