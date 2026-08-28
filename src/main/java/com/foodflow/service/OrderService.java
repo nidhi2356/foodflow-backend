@@ -1,9 +1,11 @@
 package com.foodflow.service;
 
 import com.foodflow.dto.OrderCreateRequest;
+import com.foodflow.dto.OrderCreatedEvent;
 import com.foodflow.dto.OrderItemRequest;
 import com.foodflow.dto.OrderItemResponse;
 import com.foodflow.dto.OrderResponse;
+import com.foodflow.dto.OrderStatusChangedEvent;
 import com.foodflow.entity.*;
 import com.foodflow.exception.ApiException;
 import com.foodflow.exception.ResourceNotFoundException;
@@ -20,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -33,17 +36,23 @@ public class OrderService {
     private final RestaurantRepository restaurantRepository;
     private final FoodItemRepository foodItemRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
+    private final EventPublisher eventPublisher;
 
     public OrderService(
             OrderRepository orderRepository,
             RestaurantRepository restaurantRepository,
             FoodItemRepository foodItemRepository,
-            UserRepository userRepository
+            UserRepository userRepository,
+            NotificationService notificationService,
+            EventPublisher eventPublisher
     ) {
         this.orderRepository = orderRepository;
         this.restaurantRepository = restaurantRepository;
         this.foodItemRepository = foodItemRepository;
         this.userRepository = userRepository;
+        this.notificationService = notificationService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -99,6 +108,26 @@ public class OrderService {
         order.setTotalAmount(totalAmount);
         Order savedOrder = orderRepository.save(order);
         log.info("Order created successfully with ID: {} and totalAmount: ₹{}", savedOrder.getId(), savedOrder.getTotalAmount());
+
+        // WebSocket notification to restaurant
+        notificationService.sendNewOrderNotification(
+                savedOrder.getId(),
+                restaurant.getId(),
+                customer.getId(),
+                "New order received: #" + savedOrder.getId()
+        );
+
+        // RabbitMQ asynchronous event
+        eventPublisher.publishOrderCreated(OrderCreatedEvent.builder()
+                .orderId(savedOrder.getId())
+                .userId(customer.getId())
+                .username(customer.getUsername())
+                .restaurantId(restaurant.getId())
+                .restaurantName(restaurant.getRestaurantName())
+                .totalAmount(savedOrder.getTotalAmount())
+                .status(savedOrder.getStatus())
+                .timestamp(LocalDateTime.now())
+                .build());
 
         return mapToOrderResponse(savedOrder);
     }
@@ -170,37 +199,103 @@ public class OrderService {
             throw new ApiException("Cannot cancel order with status " + order.getStatus() + ". Only PENDING orders can be cancelled.", HttpStatus.BAD_REQUEST);
         }
 
+        OrderStatus previousStatus = order.getStatus();
         order.setStatus(OrderStatus.CANCELLED);
         Order updated = orderRepository.save(order);
+
+        // Real-time WebSocket notification
+        notificationService.sendOrderStatusNotification(
+                updated.getId(),
+                updated.getRestaurant().getId(),
+                updated.getUser().getId(),
+                OrderStatus.CANCELLED,
+                "Order #" + updated.getId() + " was cancelled"
+        );
+
+        // RabbitMQ asynchronous event
+        eventPublisher.publishOrderStatusChanged(OrderStatusChangedEvent.builder()
+                .orderId(updated.getId())
+                .restaurantId(updated.getRestaurant().getId())
+                .userId(updated.getUser().getId())
+                .previousStatus(previousStatus)
+                .newStatus(OrderStatus.CANCELLED)
+                .timestamp(LocalDateTime.now())
+                .build());
+
         return mapToOrderResponse(updated);
     }
 
     @Transactional
     public OrderResponse acceptOrder(Long id) {
-        return transitionRestaurantOrder(id, OrderStatus.PENDING, OrderStatus.ACCEPTED);
+        return transitionRestaurantOrder(id, OrderStatus.PENDING, OrderStatus.ACCEPTED, "Order #" + id + " accepted");
     }
 
     @Transactional
     public OrderResponse rejectOrder(Long id) {
-        return transitionRestaurantOrder(id, OrderStatus.PENDING, OrderStatus.REJECTED);
+        return transitionRestaurantOrder(id, OrderStatus.PENDING, OrderStatus.REJECTED, "Order #" + id + " rejected");
     }
 
     @Transactional
     public OrderResponse markPreparing(Long id) {
-        return transitionRestaurantOrder(id, OrderStatus.ACCEPTED, OrderStatus.PREPARING);
+        String username = SecurityUtils.getCurrentUsername();
+        log.info("Restaurant owner '{}' attempting to mark order id: {} as PREPARING", username, id);
+
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", id));
+
+        Restaurant restaurant = order.getRestaurant();
+        if (restaurant.getOwner() == null || !restaurant.getOwner().getUsername().equals(username)) {
+            log.warn("User '{}' does not own restaurant for order id: {}", username, id);
+            throw new ApiException("Access denied: You do not own the restaurant for this order", HttpStatus.FORBIDDEN);
+        }
+
+        if (order.getStatus() != OrderStatus.ACCEPTED) {
+            throw new ApiException("Invalid status transition: Cannot transition order from " + order.getStatus() + " to PREPARING. Expected status: ACCEPTED", HttpStatus.BAD_REQUEST);
+        }
+
+        // Payment gate: Payment must be SUCCESS before preparing
+        Payment payment = order.getPayment();
+        if (payment == null || payment.getStatus() != PaymentStatus.SUCCESS) {
+            log.warn("Cannot prepare order id: {} because payment status is not SUCCESS (current: {})",
+                    id, payment != null ? payment.getStatus() : "null");
+            throw new ApiException("Cannot prepare order until payment is successfully completed", HttpStatus.BAD_REQUEST);
+        }
+
+        OrderStatus previousStatus = order.getStatus();
+        order.setStatus(OrderStatus.PREPARING);
+        Order updated = orderRepository.save(order);
+
+        notificationService.sendOrderStatusNotification(
+                updated.getId(),
+                updated.getRestaurant().getId(),
+                updated.getUser().getId(),
+                OrderStatus.PREPARING,
+                "Order #" + updated.getId() + " is being prepared"
+        );
+
+        eventPublisher.publishOrderStatusChanged(OrderStatusChangedEvent.builder()
+                .orderId(updated.getId())
+                .restaurantId(updated.getRestaurant().getId())
+                .userId(updated.getUser().getId())
+                .previousStatus(previousStatus)
+                .newStatus(OrderStatus.PREPARING)
+                .timestamp(LocalDateTime.now())
+                .build());
+
+        return mapToOrderResponse(updated);
     }
 
     @Transactional
     public OrderResponse markReady(Long id) {
-        return transitionRestaurantOrder(id, OrderStatus.PREPARING, OrderStatus.READY);
+        return transitionRestaurantOrder(id, OrderStatus.PREPARING, OrderStatus.READY, "Order #" + id + " is ready for pickup/delivery");
     }
 
     @Transactional
     public OrderResponse completeOrder(Long id) {
-        return transitionRestaurantOrder(id, OrderStatus.READY, OrderStatus.COMPLETED);
+        return transitionRestaurantOrder(id, OrderStatus.READY, OrderStatus.COMPLETED, "Order #" + id + " completed");
     }
 
-    private OrderResponse transitionRestaurantOrder(Long id, OrderStatus expectedStatus, OrderStatus targetStatus) {
+    private OrderResponse transitionRestaurantOrder(Long id, OrderStatus expectedStatus, OrderStatus targetStatus, String notificationMessage) {
         String username = SecurityUtils.getCurrentUsername();
         log.info("Restaurant owner '{}' transitioning order id: {} from {} to {}", username, id, expectedStatus, targetStatus);
 
@@ -217,8 +312,29 @@ public class OrderService {
             throw new ApiException("Invalid status transition: Cannot transition order from " + order.getStatus() + " to " + targetStatus + ". Expected status: " + expectedStatus, HttpStatus.BAD_REQUEST);
         }
 
+        OrderStatus previousStatus = order.getStatus();
         order.setStatus(targetStatus);
         Order updated = orderRepository.save(order);
+
+        // Real-time WebSocket notification
+        notificationService.sendOrderStatusNotification(
+                updated.getId(),
+                updated.getRestaurant().getId(),
+                updated.getUser().getId(),
+                targetStatus,
+                notificationMessage
+        );
+
+        // RabbitMQ asynchronous event
+        eventPublisher.publishOrderStatusChanged(OrderStatusChangedEvent.builder()
+                .orderId(updated.getId())
+                .restaurantId(updated.getRestaurant().getId())
+                .userId(updated.getUser().getId())
+                .previousStatus(previousStatus)
+                .newStatus(targetStatus)
+                .timestamp(LocalDateTime.now())
+                .build());
+
         return mapToOrderResponse(updated);
     }
 
