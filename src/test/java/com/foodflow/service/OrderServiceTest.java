@@ -49,6 +49,12 @@ class OrderServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private NotificationService notificationService;
+
+    @Mock
+    private EventPublisher eventPublisher;
+
     @InjectMocks
     private OrderService orderService;
 
@@ -426,16 +432,32 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("Restaurant owner can mark ACCEPTED order as PREPARING (ACCEPTED -> PREPARING)")
+    @DisplayName("Restaurant owner can mark ACCEPTED order as PREPARING when payment is SUCCESS (ACCEPTED -> PREPARING)")
     void shouldMarkOrderPreparing() {
         setAuthenticatedUser("chef_mario");
         sampleOrder.setStatus(OrderStatus.ACCEPTED);
+        sampleOrder.setPayment(Payment.builder().id(1001L).status(PaymentStatus.SUCCESS).build());
         when(orderRepository.findById(501L)).thenReturn(Optional.of(sampleOrder));
         when(orderRepository.save(any(Order.class))).thenReturn(sampleOrder);
 
         OrderResponse response = orderService.markPreparing(501L);
 
         assertThat(response.getStatus()).isEqualTo(OrderStatus.PREPARING);
+        verify(notificationService, times(1)).sendOrderStatusNotification(eq(501L), eq(10L), eq(1L), eq(OrderStatus.PREPARING), anyString());
+        verify(eventPublisher, times(1)).publishOrderStatusChanged(any());
+    }
+
+    @Test
+    @DisplayName("Cannot mark order as PREPARING when payment is not SUCCESS (throws 400)")
+    void shouldThrow400WhenMarkingPreparingWithoutPayment() {
+        setAuthenticatedUser("chef_mario");
+        sampleOrder.setStatus(OrderStatus.ACCEPTED);
+        sampleOrder.setPayment(null); // No payment completed
+        when(orderRepository.findById(501L)).thenReturn(Optional.of(sampleOrder));
+
+        assertThatThrownBy(() -> orderService.markPreparing(501L))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Cannot prepare order until payment is successfully completed");
     }
 
     @Test
