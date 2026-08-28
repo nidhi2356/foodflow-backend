@@ -1,12 +1,14 @@
 package com.foodflow.controller;
 
 import com.foodflow.dto.FoodResponse;
+import com.foodflow.dto.OrderResponse;
 import com.foodflow.dto.RestaurantPatchRequest;
 import com.foodflow.dto.RestaurantRequest;
 import com.foodflow.dto.RestaurantResponse;
 import com.foodflow.exception.ApiException;
 import com.foodflow.exception.ErrorResponse;
 import com.foodflow.service.FoodService;
+import com.foodflow.service.OrderService;
 import com.foodflow.service.RestaurantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -30,10 +32,16 @@ public class RestaurantController {
 
     private final RestaurantService restaurantService;
     private final FoodService foodService;
+    private final OrderService orderService;
 
-    public RestaurantController(RestaurantService restaurantService, FoodService foodService) {
+    public RestaurantController(
+            RestaurantService restaurantService,
+            FoodService foodService,
+            OrderService orderService
+    ) {
         this.restaurantService = restaurantService;
         this.foodService = foodService;
+        this.orderService = orderService;
     }
 
     @GetMapping
@@ -71,6 +79,24 @@ public class RestaurantController {
     public ResponseEntity<List<FoodResponse>> getFoodsByRestaurantId(@PathVariable Long id) {
         List<FoodResponse> foods = foodService.getFoodsByRestaurant(id);
         return ResponseEntity.ok(foods);
+    }
+
+    @GetMapping("/{id}/orders")
+    @SecurityRequirement(name = "Bearer Authentication")
+    @Operation(summary = "Get incoming orders for a restaurant", description = "Retrieves all incoming orders for a restaurant. Accessible only by the authenticated restaurant owner.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Successfully retrieved restaurant orders",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = OrderResponse.class)))),
+            @ApiResponse(responseCode = "401", description = "Unauthorized - Valid JWT token required",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Forbidden - User does not own the restaurant",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Restaurant not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<List<OrderResponse>> getRestaurantOrders(@PathVariable Long id) {
+        List<OrderResponse> orders = orderService.getRestaurantOrders(id);
+        return ResponseEntity.ok(orders);
     }
 
     @PostMapping
