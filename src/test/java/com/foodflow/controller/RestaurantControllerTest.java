@@ -9,6 +9,7 @@ import com.foodflow.exception.ApiException;
 import com.foodflow.exception.ResourceNotFoundException;
 import com.foodflow.security.JwtService;
 import com.foodflow.service.FoodService;
+import com.foodflow.service.OrderService;
 import com.foodflow.service.RestaurantService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,9 @@ class RestaurantControllerTest {
 
     @MockitoBean
     private FoodService foodService;
+
+    @MockitoBean
+    private OrderService orderService;
 
     @MockitoBean
     private JwtService jwtService;
@@ -110,6 +114,39 @@ class RestaurantControllerTest {
         mockMvc.perform(get("/api/restaurants/1/foods"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].name").value("Paneer Bowl"));
+    }
+
+    @Test
+    @DisplayName("GET /api/restaurants/{id}/orders should return restaurant incoming orders")
+    void getRestaurantOrdersShouldReturnList() throws Exception {
+        com.foodflow.dto.OrderResponse order = com.foodflow.dto.OrderResponse.builder()
+                .id(100L)
+                .userId(1L)
+                .username("john_doe")
+                .restaurantId(1L)
+                .restaurantName("Green Bowl")
+                .totalAmount(java.math.BigDecimal.valueOf(560.00))
+                .status(com.foodflow.entity.OrderStatus.PENDING)
+                .build();
+
+        when(orderService.getRestaurantOrders(1L)).thenReturn(List.of(order));
+
+        mockMvc.perform(get("/api/restaurants/1/orders"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(100L))
+                .andExpect(jsonPath("$[0].restaurantName").value("Green Bowl"))
+                .andExpect(jsonPath("$[0].totalAmount").value(560.00));
+    }
+
+    @Test
+    @DisplayName("GET /api/restaurants/{id}/orders should return 403 when user does not own restaurant")
+    void getRestaurantOrdersShouldReturn403WhenNotOwner() throws Exception {
+        when(orderService.getRestaurantOrders(1L))
+                .thenThrow(new ApiException("Access denied: You do not own this restaurant", HttpStatus.FORBIDDEN));
+
+        mockMvc.perform(get("/api/restaurants/1/orders"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
     }
 
     @Test
